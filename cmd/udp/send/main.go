@@ -11,7 +11,6 @@ import (
 	"path/filepath"
 	"sort"
 	"strconv"
-	"strings"
 
 	"github.com/WishedBy/recorder/pkg/udp"
 	"github.com/davecgh/go-spew/spew"
@@ -39,7 +38,7 @@ func main() {
 		log.Fatal(err)
 	}
 	sort.Slice(files, func(i, j int) bool {
-		return strings.Compare(files[i], files[j]) == -1
+		return files[i] < files[j]
 	})
 	switch file {
 	case "last":
