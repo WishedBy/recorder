@@ -4,24 +4,52 @@ import (
 	"context"
 	"encoding/binary"
 	"errors"
+	"io"
 	"log"
 	"net"
-	"os"
 	"strconv"
 	"sync"
 )
 
-type recorder struct {
-	bufPool  sync.Pool
-	port     uint
-	filename string
+type NextReaderI interface {
+	ReadNext() ([]byte, error)
 }
 
-func NewRecorder(port uint, filename string) *recorder {
+type NextReader struct {
+	Src io.Reader
+}
+
+func (u *NextReader) ReadNext() ([]byte, error) {
+	sb := make([]byte, 4)
+	n, err := u.Src.Read(sb)
+	if err != nil {
+		return []byte{}, err
+	}
+	size := binary.BigEndian.Uint32(sb)
+	content := make([]byte, size)
+	n, err = u.Src.Read(content)
+	if err != nil {
+		return []byte{}, err
+	}
+	if n != int(size) {
+		return content, errors.New("Unable to read next item.")
+	}
+	nl := make([]byte, 1)
+	n, err = u.Src.Read(nl)
+	return content, err
+}
+
+type recorder struct {
+	bufPool sync.Pool
+	port    uint
+	dst     io.Writer
+}
+
+func NewRecorder(port uint, dst io.Writer) *recorder {
 
 	return &recorder{
-		port:     port,
-		filename: filename,
+		port: port,
+		dst:  dst,
 		bufPool: sync.Pool{
 			New: func() interface{} {
 				return make([]byte, 65536)
@@ -40,11 +68,6 @@ func (r *recorder) ListenAndRecord(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	f, err := os.Create(r.filename)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
 
 	readCh := make(chan []byte)
 	go func() {
@@ -76,12 +99,33 @@ func (r *recorder) ListenAndRecord(ctx context.Context) error {
 		case msg := <-readCh:
 			size := make([]byte, 4)
 			binary.BigEndian.PutUint32(size, uint32(len(msg)))
-			f.Write(size)
-			f.Write(msg)
-			f.Write([]byte{'\n'})
+			r.dst.Write(size)
+			r.dst.Write(msg)
+			r.dst.Write([]byte{'\n'})
 		}
 
 	}
 
 	return errors.New("udp recording stopped")
+}
+
+func SendUDP(ctx context.Context, addr *net.UDPAddr, src NextReaderI) error {
+
+	conn, _ := net.DialUDP("udp", nil, addr)
+
+	var data []byte
+	var err error
+	for {
+		data, err = src.ReadNext()
+		if err != nil {
+			break
+		}
+		select {
+		case <-ctx.Done():
+			return errors.New("stopped sending, context done")
+		default:
+		}
+		conn.Write(data)
+	}
+	return err
 }

@@ -24,11 +24,17 @@ func main() {
 	}()
 
 	port := flag.Uint("port", 514, "udp port to listen on")
-
+	flag.Parse()
 	file := "./data/udp-" + time.Now().UTC().Format("20060102T150405") + ".log"
 
-	rec := udp.NewRecorder(*port, file)
-	err := rec.ListenAndRecord(ctx)
+	f, err := os.Create(file)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer f.Close()
+
+	rec := udp.NewRecorder(*port, f)
+	err = rec.ListenAndRecord(ctx)
 	log.Println(err)
 
 }
